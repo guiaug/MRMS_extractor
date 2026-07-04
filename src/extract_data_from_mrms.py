@@ -9,8 +9,10 @@ folder_to_data = "../RAW_MRMS/"
 
 # A dictionnary that contains lakes to focus on
 watersheds = {}
-watersheds[""]
-
+# Lake George
+lakename = "LakeGeorge"
+watersheds[lakename] = {}
+watersheds[lakename] = np.array([-79.5843 + 360.0, -79.1575 + 360.0, 42.02524, 42.34468])
 
 
 
@@ -47,6 +49,17 @@ for filename in sorted_files:
     # We get longitude and latitude
     longitude = data["longitude"].values
     latitude = data["latitude"].values
+
+
+    # Now let's loop through the lakes we want to focus on
+    for lakename in watersheds:
+        print(lakename)
+        lon_west = watersheds[lakename][0]
+        lon_east = watersheds[lakename][1]
+        lat_south = watersheds[lakename][2]
+        lat_north = watersheds[lakename][3]
+
+
 
     # Look for the data point that falls into the bounding box
     loc_lon_west = np.squeeze(np.where(longitude >= lon_west))[0]
@@ -93,3 +106,4 @@ for filename in sorted_files:
     Var_time[:] = date2num(timestamp, units=basetime)
 
     nc_out.close()
+    
