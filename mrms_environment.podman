@@ -1,0 +1,23 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libhdf5-dev \
+    libnetcdf-dev \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# Create a virtual environment
+RUN python3 -m venv /opt/venv
+
+# Ensure the virtual environment is used automatically for all following steps
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip and install netCDF4 safely inside the venv
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir netCDF4 && \
+    pip install --no-cache-dir xarray && \
+    pip install --no-cache-dir cfgrib
