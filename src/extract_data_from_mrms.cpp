@@ -60,6 +60,21 @@ int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double
 	long Nlon; // Number of longitude data points
 	long Nlat; // Number of latitude data points
 	size_t values_len; // Total number of datapoints. It is equals to Nlon * Nlat
+	double top_right_lat; // Latitude of top right grid point
+	double top_right_lon; // Longitude of top right grid point
+	double lat_delta; // heigt of grid cell
+	double lon_delta; // width of grid cell
+	
+	
+	/*
+	latitudeOfFirstGridPointInDegrees       54.995
+	longitudeOfFirstGridPointInDegrees      230.005
+	latitudeOfLastGridPointInDegrees        20.005
+	longitudeOfLastGridPointInDegrees       299.995
+	iDirectionIncrementInDegrees            0.01
+	jDirectionIncrementInDegrees            0.01
+	*/
+	
 	
 	
 	
@@ -82,14 +97,42 @@ int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double
 	CODES_CHECK(codes_get_long(h, "Ni", &Nlon), 0);
 	CODES_CHECK(codes_get_long(h, "Nj", &Nlat), 0);
 	CODES_CHECK(codes_get_size(h, "values", &values_len), 0);
-	
+	CODES_CHECK(codes_get_double(h, "latitudeOfFirstGridPointInDegrees", &top_right_lat), 0);
+	CODES_CHECK(codes_get_double(h, "longitudeOfFirstGridPointInDegrees", &top_right_lon), 0);
+	CODES_CHECK(codes_get_double(h, "jDirectionIncrementInDegrees", &lat_delta), 0);
+	CODES_CHECK(codes_get_double(h, "iDirectionIncrementInDegrees", &lon_delta), 0);
+
 	
 	cout << "   Grid Dimensions: " << Nlon << " x " << Nlat << " (Total points: " << (Nlon * Nlat) << ")" << endl;
+	cout << values_len << endl;
+	cout << "First latitude: " << top_right_lat << " First longitude: " << top_right_lon << endl;
+	cout << "lat_delta: " << lat_delta << " lon_delta: " << lon_delta << endl;
+	
+	// Create the coordinate variables
+	// First we do latitude
+	latitude = new double[Nlat];
+	for(int nj=0; nj< Nlat; nj++)
+	{
+		// Because the starting point is top right, we have to deduct the lat step
+		latitude[nj] = top_right_lat - nj * lat_delta;
+	}
+	// Then longitude
+	longitude = new double[Nlon];
+	for(int ni=0; ni< Nlon; ni++)
+	{
+		longitude[ni] = top_right_lon + ni * lon_delta;
+	}
+	
+	
+	cout << "Last latitude point: " << latitude[Nlat-1] << endl;
+	cout << "Last longitude point: " << longitude[Nlon-1] << endl;
 	
 	// 4. Extract Data Array Size and Values
 	qpe_values = new double[values_len];
 	CODES_CHECK(codes_get_double_array(h, "values", qpe_values, &values_len), 0);
 	
+	
+	/*
 	// 5. Print Metadata details
 	char shortName[256];
 	size_t name_len = sizeof(shortName);
@@ -106,9 +149,13 @@ int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double
 			printed_count++;
 		}
 	}
+	 */
 	
 	// 7. Clean up memory and close file
 	codes_handle_delete(h);
+	delete [] qpe_values;
+	delete [] longitude;
+	delete [] latitude;
 	fclose(f);
 	
 	cout << "\n Successfully processed MRMS file." << endl;
