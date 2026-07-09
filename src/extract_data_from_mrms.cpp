@@ -16,7 +16,9 @@
 
 using namespace std;
 
-int convert_grib2_to_netcdf(string filename_str);//, const char *lakename, double *latminmax, double *lonminmax);
+int convert_grib2_to_netcdf(string filename_str, double latmin, double latmax, double lonmin, double lonmax);//, const char *lakename, double *latminmax, double *lonminmax);
+void create_coordinate_array(double *coord, double coord_start, double coord_step, long length, long ScanNegatively);
+void get_mapping_indices(double *raw_coord, long length, double bb_m, double bb_M, long *index, long ScanNegatively);
 
 int main() {
 	
@@ -28,7 +30,7 @@ int main() {
 	// Error handle
 	int error;
 	
-	error = convert_grib2_to_netcdf(filename);
+	error = convert_grib2_to_netcdf(filename, 42.02524,42.34468, -79.5843 + 360.0, -79.1575 + 360.0);
 
 	
 	return 0;
@@ -36,12 +38,14 @@ int main() {
 
 
 
-int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double *latminmax, double *lonminmax)
+int convert_grib2_to_netcdf(string filename_str, double latmin, double latmax, double lonmin, double lonmax)//, const char *lakename, double *latminmax, double *lonminmax)
 {
-	// Creatiof of a pointer to get all the qpe values from the grib2 file
+	// Creatiof on a pointer to get all the qpe values from the grib2 file
 	double *qpe_values;
 	double *longitude;
 	double *latitude;
+	long lat_index[2];
+	long lon_index[2];
 	
 	// Apparently, the function FILE requires a const char*
 	// That way, the filename can be modified in the main block.
@@ -60,22 +64,12 @@ int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double
 	long Nlon; // Number of longitude data points
 	long Nlat; // Number of latitude data points
 	size_t values_len; // Total number of datapoints. It is equals to Nlon * Nlat
-	double top_right_lat; // Latitude of top right grid point
-	double top_right_lon; // Longitude of top right grid point
+	double nor_wes_lat; // Latitude of north west grid point
+	double nor_wes_lon; // Longitude of north west grid point
 	double lat_delta; // heigt of grid cell
 	double lon_delta; // width of grid cell
-	
-	
-	/*
-	latitudeOfFirstGridPointInDegrees       54.995
-	longitudeOfFirstGridPointInDegrees      230.005
-	latitudeOfLastGridPointInDegrees        20.005
-	longitudeOfLastGridPointInDegrees       299.995
-	iDirectionIncrementInDegrees            0.01
-	jDirectionIncrementInDegrees            0.01
-	*/
-	
-	
+	long iScansNegatively; // Useful to know where the first point is located
+	long jScansNegatively; // Useful to know where the first point is located
 	
 	
 	// 1. Open the GRIB2 file
@@ -96,60 +90,44 @@ int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double
 	// 3. Extract Grid Metadata (Dimensions)
 	CODES_CHECK(codes_get_long(h, "Ni", &Nlon), 0);
 	CODES_CHECK(codes_get_long(h, "Nj", &Nlat), 0);
+	CODES_CHECK(codes_get_long(h, "iScansNegatively", &iScansNegatively), 0);
+	CODES_CHECK(codes_get_long(h, "jScansNegatively", &jScansNegatively), 0);
+	
 	CODES_CHECK(codes_get_size(h, "values", &values_len), 0);
-	CODES_CHECK(codes_get_double(h, "latitudeOfFirstGridPointInDegrees", &top_right_lat), 0);
-	CODES_CHECK(codes_get_double(h, "longitudeOfFirstGridPointInDegrees", &top_right_lon), 0);
+	CODES_CHECK(codes_get_double(h, "latitudeOfFirstGridPointInDegrees", &nor_wes_lat), 0);
+	CODES_CHECK(codes_get_double(h, "longitudeOfFirstGridPointInDegrees", &nor_wes_lon), 0);
 	CODES_CHECK(codes_get_double(h, "jDirectionIncrementInDegrees", &lat_delta), 0);
 	CODES_CHECK(codes_get_double(h, "iDirectionIncrementInDegrees", &lon_delta), 0);
-
 	
-	cout << "   Grid Dimensions: " << Nlon << " x " << Nlat << " (Total points: " << (Nlon * Nlat) << ")" << endl;
-	cout << values_len << endl;
-	cout << "First latitude: " << top_right_lat << " First longitude: " << top_right_lon << endl;
-	cout << "lat_delta: " << lat_delta << " lon_delta: " << lon_delta << endl;
-	
-	// Create the coordinate variables
+	// ======================= Begin creating the coordinate variables
 	// First we do latitude
 	latitude = new double[Nlat];
-	for(int nj=0; nj< Nlat; nj++)
-	{
-		// Because the starting point is top right, we have to deduct the lat step
-		latitude[nj] = top_right_lat - nj * lat_delta;
-	}
+	cout << "Creating latitude array" << endl;
+	create_coordinate_array(latitude, nor_wes_lat, lat_delta, Nlat, jScansNegatively);
+	
 	// Then longitude
 	longitude = new double[Nlon];
-	for(int ni=0; ni< Nlon; ni++)
-	{
-		longitude[ni] = top_right_lon + ni * lon_delta;
-	}
+	cout << "Creating longitude array" << endl;
+	create_coordinate_array(longitude, nor_wes_lon, lon_delta, Nlon, iScansNegatively);
+	
+	// ======================= Finish creating the coordinate variables
 	
 	
-	cout << "Last latitude point: " << latitude[Nlat-1] << endl;
-	cout << "Last longitude point: " << longitude[Nlon-1] << endl;
 	
+	// ======================= Begin creating the QPE variable and subsample the data
 	// 4. Extract Data Array Size and Values
 	qpe_values = new double[values_len];
 	CODES_CHECK(codes_get_double_array(h, "values", qpe_values, &values_len), 0);
 	
+	get_mapping_indices(latitude, Nlat, latmin, latmax, lat_index, jScansNegatively);
+	get_mapping_indices(longitude, Nlon, lonmin, lonmax, lon_index, iScansNegatively);
 	
-	/*
-	// 5. Print Metadata details
-	char shortName[256];
-	size_t name_len = sizeof(shortName);
-	codes_get_string(h, "shortName", shortName, &name_len);
-	cout << " Parameter Short Name: " << shortName << endl;
+	// Get the indices that fall into the bounding box set up by the user
+	// The way it is done will depend on orientation of the coordinates
 	
-	// 6. Print sample values (First 10 non-negative data points)
-	cout << "\n Sample Precip Data (mm):" << endl;
-	int printed_count = 0;
-	for (size_t i = 0; i < values_len && printed_count < 10; ++i) {
-		// MRMS uses specific negative values (like -99) for missing data/no coverage
-		if (qpe_values[i] >= 0) {
-			cout << "Index [" << i << "]: " << qpe_values[i] << " mm" << endl;
-			printed_count++;
-		}
-	}
-	 */
+	
+	// ======================= Finish creating the QPE variable and subsample the data
+	
 	
 	// 7. Clean up memory and close file
 	codes_handle_delete(h);
@@ -161,4 +139,74 @@ int convert_grib2_to_netcdf(string filename_str)//, const char *lakename, double
 	cout << "\n Successfully processed MRMS file." << endl;
 	
 	return 0;
+}
+
+// This function creates the longitude and latitude array, based on the metadata gathered from the
+void create_coordinate_array(double *coord, double coord_start, double coord_step, long length, long ScanNegatively)
+{
+	int ni;
+	
+	// If the longitude goes from east to west
+	if(ScanNegatively)
+	{
+		cout << "Negative Scan" << endl;
+		for(int ni=0; ni< length; ni++)
+		{
+			coord[ni] = coord_start - ni * coord_step;
+		}
+	}else{
+		cout << "Positive Scan" << endl;
+		for(int ni=0; ni< length; ni++)
+		{
+			coord[ni] = coord_start + ni * coord_step;
+		}
+	}
+}
+
+// This function creates a mapping between the future 2D array and the 1D array from MRMS.
+// That way, we don't need to create another two full 2D array with the coordinates, and
+// check with the bounding box. It ought to be faster and less memory hungry that way.
+void get_mapping_indices(double *raw_coord, long length, double bb_m, double bb_M, long *index, long ScanNegatively)
+{
+	long ni;
+	
+	// If it scans negatively, i.e. it goes through the coordinate in a decreasing order.
+	if(ScanNegatively)
+	{
+		for(ni=0; ni<length; ni++)
+		{
+			if(raw_coord[ni] >= bb_M)
+			{
+				index[0] = ni;
+			}
+
+			if(raw_coord[ni] >= bb_m)
+			{
+				index[1] = ni;
+			}
+		}
+		
+		cout << "bbox min: " << bb_m << " bbox_max: " << bb_M << endl;
+		cout << "data min: " << raw_coord[index[1] ] << " data max: " << raw_coord[index[0]]<< endl;
+		
+	}else{
+		for(ni=0; ni<length; ni++)
+		{
+			if(raw_coord[ni] <= bb_m)
+			{
+				index[0] = ni;
+			}
+
+			if(raw_coord[ni] <= bb_M)
+			{
+				index[1] = ni;
+			}
+		}
+		
+		cout << "bbox min: " << bb_m << " bbox_max: " << bb_M << endl;
+		cout << "data min: " << raw_coord[index[0] ] << " data max: " << raw_coord[index[1]]<< endl;
+		
+	}
+	
+	
 }
